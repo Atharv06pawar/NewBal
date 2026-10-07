@@ -1,0 +1,28 @@
+{
+  "name": "newbal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NEWBAL — The 100% Free Lifetime Open-Source TallyPrime Killer",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace=apps/web run dev",
+    "dev:all": "node scripts/dev-all.js",
+    "build": "npm --workspace=apps/web run build && npm --workspace=apps/server run build",
+    "preview": "npm --workspace=apps/web run preview"
+  },
+  "keywords": [
+    "tally",
+    "accounting",
+    "gst",
+    "inventory",
+    "payroll",
+    "erp",
+    "free",
+    "open-source"
+  ],
+  "author": "NEWBAL Open Source",
+  "license": "MIT"
+}

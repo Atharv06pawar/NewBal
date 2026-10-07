@@ -1,0 +1,16 @@
+{
+  "short_name": "NEWBAL",
+  "name": "NEWBAL Accounting & ERP",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#059669",
+  "display": "standalone",
+  "orientation": "any"
+}
