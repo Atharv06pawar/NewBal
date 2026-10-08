@@ -3,6 +3,7 @@ import type { Company, VoucherType } from '@newbal/shared';
 import { db } from '../lib/db';
 import { checkAndSeedInitialData } from '../lib/seed';
 import { AuthService, type AuthUserProfile } from '../lib/supabase';
+import { CloudSyncEngine, type SyncState } from '../lib/cloudSyncEngine';
 
 export type ActiveTab =
   | 'dashboard'
@@ -42,6 +43,10 @@ interface AppContextType {
   refreshKey: number;
   triggerRefresh: () => void;
   isLoading: boolean;
+  syncState: SyncState;
+  syncMessage: string;
+  needsSqlSetup: boolean;
+  triggerCloudSync: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -61,9 +66,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [refreshKey, setRefreshKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  const triggerRefresh = () => setRefreshKey((prev) => prev + 1);
+  // Live Cloud Sync State
+  const [syncState, setSyncState] = useState<SyncState>('IDLE');
+  const [syncMessage, setSyncMessage] = useState<string>('');
+  const [needsSqlSetup, setNeedsSqlSetup] = useState<boolean>(false);
 
-  // Initialize and load company data
+  const triggerRefresh = () => {
+    setRefreshKey((prev) => prev + 1);
+    // Push activity immediately on every update
+    CloudSyncEngine.pushActivity();
+  };
+
+  const triggerCloudSync = () => {
+    CloudSyncEngine.syncAll(() => triggerRefresh());
+  };
+
+  // Subscribe to CloudSyncEngine state changes
+  useEffect(() => {
+    const unsub = CloudSyncEngine.subscribe((state, msg) => {
+      setSyncState(state);
+      setSyncMessage(msg || '');
+      setNeedsSqlSetup(CloudSyncEngine.getState().needsSqlSetup);
+    });
+    return unsub;
+  }, []);
+
+  // Initialize and load company data + CloudSyncEngine
   useEffect(() => {
     async function init() {
       try {
@@ -74,6 +102,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const currentAuth = await AuthService.getCurrentUser();
         setAuthUser(currentAuth);
+
+        // Start background cloud sync engine
+        CloudSyncEngine.init(() => {
+          setRefreshKey((prev) => prev + 1);
+        });
+
+        if (currentAuth?.id) {
+          CloudSyncEngine.setupRealtime(currentAuth.id, () => {
+            setRefreshKey((prev) => prev + 1);
+          });
+        }
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
@@ -176,6 +215,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshKey,
         triggerRefresh,
         isLoading,
+        syncState,
+        syncMessage,
+        needsSqlSetup,
+        triggerCloudSync,
       }}
     >
       {children}

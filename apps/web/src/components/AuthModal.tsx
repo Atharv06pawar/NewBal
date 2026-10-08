@@ -266,7 +266,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 disabled={loading}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium shadow-md shadow-emerald-950/40 transition"
               >
-                {loading ? 'Authenticating...' : mode === 'LOGIN' ? 'Sign In' : 'Create Lifetime Free Account'}
+                {loading ? 'Authenticating...' : mode === 'LOGIN' ? 'Sign In' : 'Create Account'}
               </button>
             </form>
 
@@ -282,7 +282,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     }}
                     className="text-emerald-400 font-medium hover:underline"
                   >
-                    Sign up free
+                    Sign up
                   </button>
                 </span>
               ) : (
@@ -307,10 +307,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
                 <div className="font-semibold text-slate-300 flex items-center space-x-1">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Free Cloud Sync (Supabase) Setup:</span>
+                  <span>Cloud Sync Configuration:</span>
                 </div>
                 <p>
-                  To sync across devices via cloud, add your free Supabase URL & Key in <code>apps/web/.env</code>.
+                  To sync across devices via cloud, configure Supabase URL & Key in <code>apps/web/.env</code>.
                 </p>
               </div>
             )}

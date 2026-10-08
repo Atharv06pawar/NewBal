@@ -95,7 +95,7 @@ export const MasterAccountModal: React.FC<{ isOpen: boolean; onClose: () => void
               <div className="flex items-center space-x-2">
                 <h2 className="text-base font-bold text-slate-100">Single Master Account & Device Link</h2>
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-mono px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  Free Lifetime
+                  Active
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -122,7 +122,7 @@ export const MasterAccountModal: React.FC<{ isOpen: boolean; onClose: () => void
               </div>
               <div className="flex items-center space-x-1.5 text-[11px] text-emerald-400 pt-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Zero Subscription • Lifetime Free Universal Access</span>
+                <span>Universal Multi-Device Accounting Access</span>
               </div>
             </div>
 

@@ -60,7 +60,7 @@ export const Sidebar: React.FC = () => {
                   Prime
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium">Free Lifetime ERP</p>
+              <p className="text-[10px] text-slate-400 font-medium">Enterprise ERP</p>
             </div>
           </div>
 
