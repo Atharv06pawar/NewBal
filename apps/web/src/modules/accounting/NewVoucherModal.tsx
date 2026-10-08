@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../../store/AppContext';
 import { db } from '../../lib/db';
 import type { VoucherType, Voucher, Ledger, StockItem, Godown } from '@newbal/shared';
-import { X, Plus, Trash2, Printer, Check, AlertCircle, Paperclip, ShieldCheck } from 'lucide-react';
+import { X, Plus, Trash2, Printer, Check, AlertCircle, Paperclip, ShieldCheck, Sparkles, Zap, Brain } from 'lucide-react';
 import { ExportEngine } from '../../lib/exportEngine';
 import { AuditSecurityEngine } from '../../lib/auditSecurity';
+import { SmartAccountingEngine, type SmartEntryRecommendation } from '../../lib/smartAccountingEngine';
 
 export const NewVoucherModal: React.FC = () => {
   const { isNewVoucherOpen, closeNewVoucher, newVoucherType, activeCompany, triggerRefresh } = useApp();
@@ -18,6 +19,44 @@ export const NewVoucherModal: React.FC = () => {
   const [isInterstate, setIsInterstate] = useState(false);
   const [autoPrintPDF, setAutoPrintPDF] = useState(true);
   const [attachedFile, setAttachedFile] = useState<{ name: string; type: string; base64: string } | null>(null);
+
+  // Smart Assistant state
+  const [smartPrompt, setSmartPrompt] = useState('');
+  const [smartRec, setSmartRec] = useState<SmartEntryRecommendation | null>(null);
+
+  const handleSmartPromptChange = (val: string) => {
+    setSmartPrompt(val);
+    if (val.trim().length > 3) {
+      const rec = SmartAccountingEngine.analyzeSentence(val, allLedgers);
+      setSmartRec(rec);
+    } else {
+      setSmartRec(null);
+    }
+  };
+
+  const applySmartAssistant = (rec: SmartEntryRecommendation) => {
+    setVchType(rec.recommendedVoucherType);
+    setNarration(rec.detectedFields.narration);
+    if (rec.detectedFields.invoiceNumber) setReferenceNumber(rec.detectedFields.invoiceNumber);
+
+    if (rec.recommendedVoucherType === 'SALES' || rec.recommendedVoucherType === 'PURCHASE') {
+      const party = allLedgers.find((l) =>
+        l.name.toLowerCase().includes((rec.detectedFields.vendorOrPartyName || '').toLowerCase().split(' ')[0])
+      ) || allLedgers[0];
+      if (party) setPartyLedgerId(party.id);
+    } else {
+      setLedgerEntries(
+        rec.recommendedEntries.map((e) => ({
+          ledgerId: e.ledgerId,
+          ledgerName: e.ledgerName,
+          amount: e.amount,
+          type: e.type,
+        }))
+      );
+    }
+    setSmartPrompt('');
+    setSmartRec(null);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -417,6 +456,95 @@ export const NewVoucherModal: React.FC = () => {
 
         {/* Form Body */}
         <div className="p-3.5 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6 flex-1 text-xs sm:text-sm">
+          {/* Smart AI Entry Assistant */}
+          <div className="bg-slate-950/80 border border-emerald-500/30 rounded-xl p-3 space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center space-x-2 text-xs font-semibold text-emerald-400">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Smart Entry Assistant</span>
+                <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">
+                  — Type naturally to auto-fill voucher type, ledgers & amounts
+                </span>
+              </div>
+              <div className="flex items-center space-x-1.5 overflow-x-auto text-[10px]">
+                <span className="text-slate-500">Try:</span>
+                <button
+                  type="button"
+                  onClick={() => handleSmartPromptChange('Paid 4500 electricity bill by HDFC bank')}
+                  className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-300 transition whitespace-nowrap"
+                >
+                  ⚡ Paid 4500 Electricity (HDFC)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSmartPromptChange('Paid 35000 office rent by SBI')}
+                  className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-300 transition whitespace-nowrap"
+                >
+                  🏢 Rent 35000 (SBI)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSmartPromptChange('Received 50000 from Acme Systems into SBI')}
+                  className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-300 transition whitespace-nowrap"
+                >
+                  💰 Received 50k from Acme
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSmartPromptChange('Withdrew 10000 cash from HDFC')}
+                  className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-emerald-300 transition whitespace-nowrap"
+                >
+                  🏦 Cash 10k from HDFC
+                </button>
+              </div>
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={smartPrompt}
+                onChange={(e) => handleSmartPromptChange(e.target.value)}
+                placeholder="Describe your transaction in plain English (e.g. 'Paid 4500 electricity bill by HDFC' or 'Received 50000 from Acme')..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 pr-24"
+              />
+              {smartRec && (
+                <button
+                  type="button"
+                  onClick={() => applySmartAssistant(smartRec)}
+                  className="absolute right-1 top-1 bottom-1 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-medium flex items-center space-x-1 transition shadow"
+                >
+                  <Zap className="w-3 h-3" />
+                  <span>Apply</span>
+                </button>
+              )}
+            </div>
+
+            {smartRec && (
+              <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-500/30 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-bold text-emerald-400">
+                      Recommendation: {smartRec.recommendedVoucherType} ({smartRec.recommendedVoucherType === 'PAYMENT' ? 'F5' : smartRec.recommendedVoucherType === 'RECEIPT' ? 'F6' : smartRec.recommendedVoucherType === 'CONTRA' ? 'F4' : smartRec.recommendedVoucherType === 'SALES' ? 'F8' : 'F9'})
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {smartRec.confidenceScore}% match
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    {smartRec.reasoning}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applySmartAssistant(smartRec)}
+                  className="px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded text-xs font-semibold border border-emerald-500/30 whitespace-nowrap transition"
+                >
+                  Apply Entry
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Metadata Row */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
