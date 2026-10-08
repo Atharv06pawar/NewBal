@@ -1,5 +1,5 @@
 import { db } from './db';
-import { supabase, isSupabaseConfigured, AuthService, type AuthUserProfile } from './supabase';
+import { supabase, AuthService, getAccountIdForEmail } from './supabase';
 import type { Company, Voucher, Ledger, StockItem, Godown, BankAccount, Employee } from '@newbal/shared';
 
 export type SyncState = 'SYNCED' | 'SYNCING' | 'OFFLINE' | 'NEEDS_TABLE' | 'IDLE';
@@ -13,7 +13,9 @@ export class CloudSyncEngine {
   private static syncInterval: any = null;
   private static realtimeChannel: any = null;
   private static isSyncing = false;
+  private static isInitialized = false;
   private static needsSqlSetup = false;
+  private static activeUserId: string | null = null;
 
   private static getDeviceId(): string {
     let id = localStorage.getItem('newbal_device_id');
@@ -48,9 +50,15 @@ export class CloudSyncEngine {
 
   /**
    * Initialize automatic listeners (online/offline, focus, heartbeat, realtime)
+   * Protected with isInitialized flag so it is only setup once.
    */
   static init(onDataUpdated?: () => void) {
     if (typeof window === 'undefined') return;
+
+    if (this.isInitialized) {
+      return;
+    }
+    this.isInitialized = true;
 
     // 1. Online / Offline events
     window.addEventListener('online', () => {
@@ -59,10 +67,10 @@ export class CloudSyncEngine {
     });
 
     window.addEventListener('offline', () => {
-      this.notify('OFFLINE', 'No internet connection. Changes saved locally.');
+      this.notify('OFFLINE', 'Offline. Changes saved locally, will sync when connected.');
     });
 
-    // 2. Focus & Tab visibility change (pull updates from other device)
+    // 2. Tab focus & visibility change (pull updates from other device)
     window.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         this.pullLatest(onDataUpdated);
@@ -75,19 +83,19 @@ export class CloudSyncEngine {
       }
     });
 
-    // 3. Periodic heartbeat sync (every 15 seconds)
+    // 3. Periodic heartbeat sync (every 10 seconds when online)
     if (!this.syncInterval) {
       this.syncInterval = setInterval(() => {
-        if (navigator.onLine) {
+        if (navigator.onLine && !this.isSyncing) {
           this.pullLatest(onDataUpdated);
         }
-      }, 15000);
+      }, 10000);
     }
 
     // 4. Initial sync after short delay
     setTimeout(() => {
       this.syncAll(onDataUpdated);
-    }, 800);
+    }, 500);
   }
 
   /**
@@ -95,17 +103,21 @@ export class CloudSyncEngine {
    */
   static setupRealtime(userId: string, onDataUpdated?: () => void) {
     if (!supabase || !userId) return;
+    if (this.activeUserId === userId && this.realtimeChannel) return;
 
     try {
+      this.activeUserId = userId;
       if (this.realtimeChannel) {
         supabase.removeChannel(this.realtimeChannel);
       }
 
       this.realtimeChannel = supabase
-        .channel(`cloud_sync_${userId}`)
+        .channel(`cloud_sync_${userId}`, {
+          config: { broadcast: { ack: false } },
+        })
         .on('broadcast', { event: 'data_changed' }, async (payload: any) => {
           if (payload?.payload?.deviceId !== this.getDeviceId()) {
-            // Change came from another device! Pull immediately
+            console.log('Sync ping received from peer device. Refreshing...');
             await this.pullLatest(onDataUpdated);
           }
         })
@@ -120,36 +132,37 @@ export class CloudSyncEngine {
    */
   static async syncAll(onDataUpdated?: () => void) {
     if (!navigator.onLine) {
-      this.notify('OFFLINE', 'Offline. Changes saved locally.');
+      this.notify('OFFLINE', 'Offline. Changes saved locally, will sync when connected.');
       return;
     }
 
-    const pulled = await this.pullLatest(onDataUpdated);
-    // If pull succeeded or cloud was empty, push any local updates
-    await this.pushActivity();
+    await this.pullLatest(onDataUpdated);
+    await this.pushActivity(onDataUpdated);
   }
 
   /**
    * Push all local activity to the cloud
    */
-  static async pushActivity(): Promise<boolean> {
+  static async pushActivity(onDataUpdated?: () => void): Promise<boolean> {
     if (this.isSyncing) return false;
     if (!navigator.onLine) {
-      this.notify('OFFLINE', 'Offline. Changes saved locally.');
+      this.notify('OFFLINE', 'Offline. Changes saved locally, will sync when connected.');
       return false;
     }
 
     const user = await AuthService.getCurrentUser();
-    if (!user || !supabase) {
-      this.notify('IDLE', 'Local storage active');
+    if (!user || !user.email) {
+      this.notify('IDLE', 'Offline mode active');
       return false;
     }
+
+    const accountId = await getAccountIdForEmail(user.email);
 
     this.isSyncing = true;
     this.notify('SYNCING', 'Syncing changes to cloud...');
 
     try {
-      // Gather all local data
+      // Gather local data
       const companies = await db.companies.toArray();
       const vouchers = await db.vouchers.toArray();
       const ledgers = await db.ledgers.toArray();
@@ -160,7 +173,54 @@ export class CloudSyncEngine {
       const employees = await db.employees.toArray();
       const salaryStructures = await db.salaryStructures.toArray();
 
+      // Check if local vouchers are purely the default demo seed vouchers
+      const isLocalOnlyDemoSeed =
+        vouchers.length > 0 &&
+        vouchers.every(
+          (v) =>
+            v.id === 'vch-sales-01' ||
+            v.id === 'vch-sales-02' ||
+            v.id === 'vch-pur-01' ||
+            v.id === 'vch-pmt-01' ||
+            v.id === 'vch-rct-01'
+        );
+
+      // Fetch existing cloud row to check if cloud already has real data
+      const { data: existingRow, error: checkErr } = await supabase
+        .from('user_sync_data')
+        .select('data')
+        .eq('user_id', accountId)
+        .maybeSingle();
+
+      if (checkErr && (checkErr.code === 'PGRST205' || checkErr.message?.includes('user_sync_data'))) {
+        this.needsSqlSetup = true;
+        this.notify('NEEDS_TABLE', 'Cloud database table needs 1-click SQL creation');
+        this.isSyncing = false;
+        return false;
+      }
+
+      // If cloud already has real vouchers, and local device only has demo seed vouchers,
+      // DO NOT overwrite cloud with demo seed vouchers! Pull cloud data instead.
+      if (isLocalOnlyDemoSeed && existingRow?.data?.vouchers?.length > 0) {
+        const cloudHasNonSeed = existingRow.data.vouchers.some(
+          (v: any) =>
+            v.id !== 'vch-sales-01' &&
+            v.id !== 'vch-sales-02' &&
+            v.id !== 'vch-pur-01' &&
+            v.id !== 'vch-pmt-01' &&
+            v.id !== 'vch-rct-01'
+        );
+        if (cloudHasNonSeed) {
+          this.isSyncing = false;
+          await this.pullLatest(onDataUpdated);
+          return true;
+        }
+      }
+
+      const existingAccount = existingRow?.data?.account;
+
       const payload = {
+        ...(existingAccount ? { account: existingAccount } : {}),
         deviceId: this.getDeviceId(),
         updatedAt: new Date().toISOString(),
         companies,
@@ -176,8 +236,8 @@ export class CloudSyncEngine {
 
       const { error } = await supabase.from('user_sync_data').upsert(
         {
-          user_id: user.id,
-          email: user.email,
+          user_id: accountId,
+          email: user.email.toLowerCase().trim(),
           data: payload,
           updated_at: new Date().toISOString(),
         },
@@ -221,18 +281,20 @@ export class CloudSyncEngine {
    */
   static async pullLatest(onDataUpdated?: () => void): Promise<boolean> {
     if (!navigator.onLine) {
-      this.notify('OFFLINE', 'Offline. Changes saved locally.');
+      this.notify('OFFLINE', 'Offline. Changes saved locally, will sync when connected.');
       return false;
     }
 
     const user = await AuthService.getCurrentUser();
-    if (!user || !supabase) return false;
+    if (!user || !user.email) return false;
+
+    const accountId = await getAccountIdForEmail(user.email);
 
     try {
       const { data, error } = await supabase
         .from('user_sync_data')
         .select('data, updated_at')
-        .eq('user_id', user.id)
+        .eq('user_id', accountId)
         .maybeSingle();
 
       if (error) {
@@ -245,7 +307,7 @@ export class CloudSyncEngine {
 
       // If cloud has no snapshot yet, push this device's data to establish the baseline
       if (!data || !data.data) {
-        await this.pushActivity();
+        await this.pushActivity(onDataUpdated);
         return true;
       }
 
@@ -290,45 +352,49 @@ export class CloudSyncEngine {
           db.salaryStructures,
         ],
         async () => {
-          if (cloud.companies?.length) {
+          if (cloud.companies && cloud.companies.length > 0) {
             await db.companies.clear();
             await db.companies.bulkPut(cloud.companies);
           }
 
-          await db.vouchers.clear();
-          await db.vouchers.bulkPut(unifiedVouchers);
+          if (cloud.vouchers !== undefined) {
+            await db.vouchers.clear();
+            if (unifiedVouchers.length > 0) {
+              await db.vouchers.bulkPut(unifiedVouchers);
+            }
+          }
 
-          if (cloud.ledgers?.length) {
+          if (cloud.ledgers && cloud.ledgers.length > 0) {
             await db.ledgers.clear();
             await db.ledgers.bulkPut(cloud.ledgers);
           }
 
-          if (cloud.ledgerGroups?.length) {
+          if (cloud.ledgerGroups && cloud.ledgerGroups.length > 0) {
             await db.ledgerGroups.clear();
             await db.ledgerGroups.bulkPut(cloud.ledgerGroups);
           }
 
-          if (cloud.stockItems?.length) {
+          if (cloud.stockItems && cloud.stockItems.length > 0) {
             await db.stockItems.clear();
             await db.stockItems.bulkPut(cloud.stockItems);
           }
 
-          if (cloud.godowns?.length) {
+          if (cloud.godowns && cloud.godowns.length > 0) {
             await db.godowns.clear();
             await db.godowns.bulkPut(cloud.godowns);
           }
 
-          if (cloud.bankAccounts?.length) {
+          if (cloud.bankAccounts && cloud.bankAccounts.length > 0) {
             await db.bankAccounts.clear();
             await db.bankAccounts.bulkPut(cloud.bankAccounts);
           }
 
-          if (cloud.employees?.length) {
+          if (cloud.employees && cloud.employees.length > 0) {
             await db.employees.clear();
             await db.employees.bulkPut(cloud.employees);
           }
 
-          if (cloud.salaryStructures?.length) {
+          if (cloud.salaryStructures && cloud.salaryStructures.length > 0) {
             await db.salaryStructures.clear();
             await db.salaryStructures.bulkPut(cloud.salaryStructures);
           }
@@ -340,7 +406,7 @@ export class CloudSyncEngine {
 
       // If we merged offline local vouchers into the cloud, push back the combined state
       if (newlyCreatedLocalVouchers.length > 0) {
-        await this.pushActivity();
+        await this.pushActivity(onDataUpdated);
       }
 
       if (onDataUpdated) {

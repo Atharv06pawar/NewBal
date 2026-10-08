@@ -232,7 +232,7 @@ export const SettingsView: React.FC = () => {
           <h3 className="font-bold text-slate-100 text-base">Offline Backup & Data Portability</h3>
         </div>
         <p className="text-xs text-slate-400">
-          Your data is stored 100% locally on your machine in IndexedDB. You can export or restore anytime.
+          Your enterprise data is securely stored on your device in IndexedDB and synchronized with your cloud account. You can export or restore anytime.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">

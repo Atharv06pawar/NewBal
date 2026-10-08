@@ -330,7 +330,7 @@ export interface MasterAccount {
   fullName: string;
   businessName: string;
   syncPairCode: string; // 6-character fast device link pairing code, e.g. "NB-8842"
-  plan: 'LIFETIME_FREE';
+  plan: 'STANDARD' | 'ENTERPRISE' | 'LIFETIME_FREE';
   connectedDevices: ConnectedDevice[];
   lastSyncedAt?: string;
   autoSyncEnabled: boolean;

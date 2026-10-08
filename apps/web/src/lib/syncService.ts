@@ -51,7 +51,7 @@ export class SyncService {
       fullName: 'Business Owner',
       businessName: 'Apex Innovations Pvt. Ltd.',
       syncPairCode: 'NB-7721',
-      plan: 'LIFETIME_FREE',
+      plan: 'STANDARD',
       connectedDevices: [
         {
           id: this.getDeviceId(),

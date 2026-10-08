@@ -105,7 +105,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return unsub;
   }, []);
 
-  // Initialize and load company data + CloudSyncEngine
+  // Initialize and load company data + CloudSyncEngine once on mount
   useEffect(() => {
     async function init() {
       try {
@@ -134,6 +134,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
     init();
+  }, []);
+
+  // Reload company data when refreshKey updates without re-running initialization
+  useEffect(() => {
+    async function reloadOnRefresh() {
+      try {
+        const allComps = await db.companies.toArray();
+        if (allComps.length > 0) {
+          setCompanies(allComps);
+          setActiveCompany((prev) => {
+            if (!prev) return allComps[0];
+            const match = allComps.find((c) => c.id === prev.id);
+            return match || allComps[0];
+          });
+        }
+      } catch (e) {}
+    }
+    reloadOnRefresh();
   }, [refreshKey]);
 
   // Keyboard shortcut listener (Tally style F4-F9, Alt+G, Escape)

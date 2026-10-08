@@ -348,7 +348,7 @@ export const ReportsView: React.FC = () => {
               <div className="bg-slate-900/90 border border-slate-800 p-6 rounded-2xl space-y-2">
                 <div className="text-xs text-slate-400">Debt to Equity Ratio</div>
                 <div className="text-3xl font-bold font-mono text-blue-400">0.00</div>
-                <p className="text-xs text-slate-400">100% Debt-Free Company</p>
+                <p className="text-xs text-slate-400">Zero Debt Enterprise</p>
               </div>
             </div>
           )}
