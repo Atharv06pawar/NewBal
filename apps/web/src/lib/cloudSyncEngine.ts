@@ -64,28 +64,30 @@ export class CloudSyncEngine {
 
     // 2. Focus & Tab visibility change (pull updates from other device)
     window.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         this.pullLatest(onDataUpdated);
       }
     });
 
     window.addEventListener('focus', () => {
-      this.pullLatest(onDataUpdated);
+      if (navigator.onLine) {
+        this.pullLatest(onDataUpdated);
+      }
     });
 
-    // 3. Periodic heartbeat sync (every 20 seconds)
+    // 3. Periodic heartbeat sync (every 15 seconds)
     if (!this.syncInterval) {
       this.syncInterval = setInterval(() => {
         if (navigator.onLine) {
           this.pullLatest(onDataUpdated);
         }
-      }, 20000);
+      }, 15000);
     }
 
-    // 4. Initial sync
+    // 4. Initial sync after short delay
     setTimeout(() => {
       this.syncAll(onDataUpdated);
-    }, 1000);
+    }, 800);
   }
 
   /**
@@ -101,10 +103,10 @@ export class CloudSyncEngine {
 
       this.realtimeChannel = supabase
         .channel(`cloud_sync_${userId}`)
-        .on('broadcast', { event: 'data_changed' }, (payload: any) => {
+        .on('broadcast', { event: 'data_changed' }, async (payload: any) => {
           if (payload?.payload?.deviceId !== this.getDeviceId()) {
             // Change came from another device! Pull immediately
-            this.pullLatest(onDataUpdated);
+            await this.pullLatest(onDataUpdated);
           }
         })
         .subscribe();
@@ -122,7 +124,8 @@ export class CloudSyncEngine {
       return;
     }
 
-    await this.pullLatest(onDataUpdated);
+    const pulled = await this.pullLatest(onDataUpdated);
+    // If pull succeeded or cloud was empty, push any local updates
     await this.pushActivity();
   }
 
@@ -240,16 +243,39 @@ export class CloudSyncEngine {
         return false;
       }
 
+      // If cloud has no snapshot yet, push this device's data to establish the baseline
       if (!data || !data.data) {
-        // No cloud snapshot yet. Push our current local data to establish cloud baseline!
         await this.pushActivity();
         return true;
       }
 
       const cloud = data.data;
-      let hasNewRecords = false;
 
-      // Conflict-Free Merge: Union by ID with Last-Write-Wins
+      // Read current local state
+      const localVouchers = await db.vouchers.toArray();
+
+      // Check if this device only has the unedited initial seed demo vouchers
+      const isLocalOnlyDemoSeed =
+        localVouchers.length > 0 &&
+        localVouchers.every(
+          (v) =>
+            v.id === 'vch-sales-01' ||
+            v.id === 'vch-sales-02' ||
+            v.id === 'vch-pur-01' ||
+            v.id === 'vch-pmt-01' ||
+            v.id === 'vch-rct-01'
+        );
+
+      // Check for any newly created local vouchers that aren't demo vouchers and aren't in cloud
+      const cloudVoucherIds = new Set((cloud.vouchers || []).map((v: any) => v.id));
+      const newlyCreatedLocalVouchers = isLocalOnlyDemoSeed
+        ? []
+        : localVouchers.filter((lv) => !cloudVoucherIds.has(lv.id));
+
+      // Build unified voucher set: Cloud snapshot + any offline vouchers created locally
+      const unifiedVouchers = [...(cloud.vouchers || []), ...newlyCreatedLocalVouchers];
+
+      // Overwrite local tables with cloud snapshot to guarantee 100% consistency across devices
       await db.transaction(
         'rw',
         [
@@ -264,62 +290,60 @@ export class CloudSyncEngine {
           db.salaryStructures,
         ],
         async () => {
-          // 1. Vouchers merge
-          if (cloud.vouchers?.length) {
-            const localVouchers = await db.vouchers.toArray();
-            const localMap = new Map(localVouchers.map((v) => [v.id, v]));
-
-            for (const cv of cloud.vouchers) {
-              const lv = localMap.get(cv.id);
-              if (!lv) {
-                await db.vouchers.put(cv);
-                hasNewRecords = true;
-              } else if (new Date(cv.updatedAt || cv.createdAt || 0) > new Date(lv.updatedAt || lv.createdAt || 0)) {
-                await db.vouchers.put(cv);
-                hasNewRecords = true;
-              }
-            }
-          }
-
-          // 2. Companies merge
           if (cloud.companies?.length) {
-            for (const cc of cloud.companies) {
-              await db.companies.put(cc);
-            }
+            await db.companies.clear();
+            await db.companies.bulkPut(cloud.companies);
           }
 
-          // 3. Ledgers merge
+          await db.vouchers.clear();
+          await db.vouchers.bulkPut(unifiedVouchers);
+
           if (cloud.ledgers?.length) {
-            const localLeds = await db.ledgers.toArray();
-            const localLedMap = new Map(localLeds.map((l) => [l.id, l]));
-            for (const cl of cloud.ledgers) {
-              if (!localLedMap.has(cl.id)) {
-                await db.ledgers.put(cl);
-                hasNewRecords = true;
-              }
-            }
+            await db.ledgers.clear();
+            await db.ledgers.bulkPut(cloud.ledgers);
           }
 
-          // 4. Inventory items merge
+          if (cloud.ledgerGroups?.length) {
+            await db.ledgerGroups.clear();
+            await db.ledgerGroups.bulkPut(cloud.ledgerGroups);
+          }
+
           if (cloud.stockItems?.length) {
-            for (const item of cloud.stockItems) {
-              await db.stockItems.put(item);
-            }
+            await db.stockItems.clear();
+            await db.stockItems.bulkPut(cloud.stockItems);
           }
 
-          // 5. Bank Accounts merge
+          if (cloud.godowns?.length) {
+            await db.godowns.clear();
+            await db.godowns.bulkPut(cloud.godowns);
+          }
+
           if (cloud.bankAccounts?.length) {
-            for (const ba of cloud.bankAccounts) {
-              await db.bankAccounts.put(ba);
-            }
+            await db.bankAccounts.clear();
+            await db.bankAccounts.bulkPut(cloud.bankAccounts);
+          }
+
+          if (cloud.employees?.length) {
+            await db.employees.clear();
+            await db.employees.bulkPut(cloud.employees);
+          }
+
+          if (cloud.salaryStructures?.length) {
+            await db.salaryStructures.clear();
+            await db.salaryStructures.bulkPut(cloud.salaryStructures);
           }
         }
       );
 
       this.needsSqlSetup = false;
-      this.notify('SYNCED', 'Up to date with cloud');
+      this.notify('SYNCED', 'All devices in sync');
 
-      if (hasNewRecords && onDataUpdated) {
+      // If we merged offline local vouchers into the cloud, push back the combined state
+      if (newlyCreatedLocalVouchers.length > 0) {
+        await this.pushActivity();
+      }
+
+      if (onDataUpdated) {
         onDataUpdated();
       }
 

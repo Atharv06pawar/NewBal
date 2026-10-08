@@ -47,6 +47,7 @@ interface AppContextType {
   syncMessage: string;
   needsSqlSetup: boolean;
   triggerCloudSync: () => void;
+  handleLoginSuccess: (user: AuthUserProfile) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -79,6 +80,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const triggerCloudSync = () => {
     CloudSyncEngine.syncAll(() => triggerRefresh());
+  };
+
+  const handleLoginSuccess = async (user: AuthUserProfile) => {
+    setAuthUser(user);
+    if (user?.id) {
+      CloudSyncEngine.setupRealtime(user.id, () => {
+        setRefreshKey((prev) => prev + 1);
+      });
+      await CloudSyncEngine.syncAll(() => {
+        setRefreshKey((prev) => prev + 1);
+      });
+      setRefreshKey((prev) => prev + 1);
+    }
   };
 
   // Subscribe to CloudSyncEngine state changes
@@ -219,6 +233,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncMessage,
         needsSqlSetup,
         triggerCloudSync,
+        handleLoginSuccess,
       }}
     >
       {children}

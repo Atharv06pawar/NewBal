@@ -29,6 +29,7 @@ export const App: React.FC = () => {
     setIsAuthModalOpen,
     authUser,
     setAuthUser,
+    handleLoginSuccess,
   } = useApp();
 
   if (isLoading) {
@@ -77,7 +78,7 @@ export const App: React.FC = () => {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         currentUser={authUser}
-        onAuthSuccess={(user) => setAuthUser(user)}
+        onAuthSuccess={handleLoginSuccess}
       />
     </div>
   );

@@ -17,11 +17,12 @@ import {
   FileSpreadsheet,
   Boxes,
   Plus,
+  RefreshCw,
 } from 'lucide-react';
 import { ExportEngine } from '../../lib/exportEngine';
 
 export const DashboardView: React.FC = () => {
-  const { activeCompany, openNewVoucher, setActiveTab, openLedgerStatement, refreshKey } = useApp();
+  const { activeCompany, openNewVoucher, setActiveTab, openLedgerStatement, refreshKey, syncState, triggerCloudSync, authUser } = useApp();
 
   const [metrics, setMetrics] = useState({
     sales: 0,
@@ -100,6 +101,20 @@ export const DashboardView: React.FC = () => {
           <p className="text-sm text-slate-400 mt-1">
             Enterprise double-entry overview for <span className="text-slate-200 font-medium">{activeCompany?.name}</span>
           </p>
+
+          {authUser && (
+            <div className="mt-2.5 flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={triggerCloudSync}
+                className="inline-flex items-center space-x-1.5 text-xs bg-slate-900 hover:bg-slate-800 text-emerald-400 px-3 py-1 rounded-full border border-slate-800 transition shadow-sm"
+                title="Click to force instant cloud refresh between your phone and laptop"
+              >
+                <RefreshCw className={`w-3 h-3 ${syncState === 'SYNCING' ? 'animate-spin' : ''}`} />
+                <span>{syncState === 'SYNCING' ? 'Syncing with Cloud...' : 'Cloud Synced • Tap to Sync'}</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center space-x-2.5">
