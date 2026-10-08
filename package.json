@@ -11,6 +11,7 @@
     "dev": "npm --workspace=apps/web run dev",
     "dev:all": "node scripts/dev-all.js",
     "build": "npm --workspace=apps/web run build && npm --workspace=apps/server run build",
+    "build:web": "npm --workspace=apps/web run build",
     "preview": "npm --workspace=apps/web run preview"
   },
   "keywords": [
